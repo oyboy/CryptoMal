@@ -1,6 +1,6 @@
 use std::path::Path;
-
-pub fn validate_params(algorithm: Option<&str>, mode: Option<&str>, key: Option<&str>, in_file: Option<&str>) -> Result<(), String> {
+use std::fs::File;
+pub fn validate_params(algorithm: Option<&str>, mode: Option<&str>, key: Option<&str>, in_file: Option<&str>, out_file: Option<&str>) -> Result<(), String> {
     if let Some(alg) = algorithm {
         if alg != "AES" {
             return Err(format!("Unsupported algorithm: {}", alg));
@@ -21,24 +21,28 @@ pub fn validate_params(algorithm: Option<&str>, mode: Option<&str>, key: Option<
             return Err(format!("Input file {} does not exist", file));
         }
     }
+    if Some(out_file) == Some(in_file) {
+        return Err("Files should have different names".to_string());
+    }
     Ok(())
 }
-pub fn create_output_file_if_not_provided(mode: &str, in_file: &str) -> Result<(), String> {
-    match mode {
-        "ENC" => {
-            let postfix = String::from(".enc");
-            let out = String::from(in_file) + &postfix;
-            println!("Creating output file {}", out);
-            Ok(())
-        }
-        "DEC" => {
-            let postfix = String::from(".dec");
-            let out = String::from(in_file) + &postfix;
-            println!("Creating output file {}", out);
-            Ok(())
-        }
-        _ => Err(format!("Unsupported mode: {}", mode)),
+pub fn create_output_file_if_not_provided(mode: &str, in_file: &str, out_file: Option<&str>) -> Result<String, String> {
+    if let Some(out) = out_file {
+        File::create(out).map_err(|e| format!("Unable to create output file '{}': {}", out, e))?;
+        return Ok(out.to_string());
     }
+    let postfix = match mode {
+        "ENC" => ".enc",
+        "DEC" => ".dec",
+        _ => return Err(format!("Unsupported mode: {}", mode)),
+    };
+
+    let out = format!("{}{}", in_file, postfix);
+    println!("Creating output file {}", out);
+
+    File::create(&out)
+        .map_err(|e| format!("Unable to create output file '{}': {}", out, e))?;
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -48,11 +52,12 @@ mod tests {
     #[test]
     fn test_validate_params() {
         let key: &str = "12345678123456781234567812345678";
-        assert!(validate_params(Some("AES"), Some("ECB"), Some(key), Some("Cargo.toml")).is_ok());
-        assert!(validate_params(Some("DES"), Some("ECB"), Some(key), Some("Cargo.toml")).is_err());
-        assert!(validate_params(Some("AES"), Some("OFB"), Some(key), Some("Cargo.toml")).is_err());
-        assert!(validate_params(Some("AES"), Some("ECB"), Some("123"), Some("Cargo.toml")).is_err());
-        assert!(validate_params(Some("AES"), Some("ECB"), Some(key), Some("nonexistent.txt")).is_err());
-        assert!(validate_params(None, None, Some(key), Some("Cargo.toml")).is_ok());
+        assert!(validate_params(Some("AES"), Some("ECB"), Some(key), Some("Cargo.toml"), Some("Cargo2.toml")).is_ok());
+        assert!(validate_params(Some("DES"), Some("ECB"), Some(key), Some("Cargo.toml"), Some("Cargo2.toml")).is_err());
+        assert!(validate_params(Some("AES"), Some("OFB"), Some(key), Some("Cargo.toml"), Some("Cargo2.toml")).is_err());
+        assert!(validate_params(Some("AES"), Some("ECB"), Some("123"), Some("Cargo.toml"), Some("Cargo2.toml")).is_err());
+        assert!(validate_params(Some("AES"), Some("ECB"), Some(key), Some("nonexistent.txt"), Some("Cargo2.toml")).is_err());
+        assert!(validate_params(Some("AES"), Some("ECB"), Some(key), Some("same.name"), Some("same.name")).is_err());
+        assert!(validate_params(None, None, Some(key), Some("Cargo.toml"), Some("Cargo2.toml")).is_ok());
     }
 }

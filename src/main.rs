@@ -1,5 +1,5 @@
 mod validate;
-
+mod cryptor;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -19,13 +19,13 @@ enum Commands {
         #[arg(short, long)]
         key: String,
         in_file: String,
-        out_file: String,
+        out_file: Option<String>,
     },
     Decrypt {
         #[arg(short, long)]
         key: String,
         in_file: String,
-        out_file: String,
+        out_file: Option<String>,
     },
 }
 
@@ -43,22 +43,16 @@ impl Command for Commands {
         match self {
             Commands::Encrypt { algorithm, mode, key, in_file, out_file } => {
                 log("running encrypt command...");
-                validate::validate_params(Some(algorithm), Some(mode), Some(key), Some(in_file))?;
-                validate::create_output_file_if_not_provided("ENC", in_file)?;
-                println!(
-                    "Encrypting {} to {} with algorithm {}, mode {}, key {}",
-                    in_file, out_file, algorithm, mode, key
-                );
+                validate::validate_params(Some(algorithm), Some(mode), Some(key), Some(in_file), out_file.as_deref())?;
+                let out = validate::create_output_file_if_not_provided("ENC", in_file, out_file.as_deref())?;
+                cryptor::encrypt_file(in_file, &out, key).expect("Encryption failed");
                 Ok(())
             }
             Commands::Decrypt {key, in_file, out_file } => {
                 log("running decrypt command...");
-                validate::validate_params(None, None, Some(key), Some(in_file))?;
-                validate::create_output_file_if_not_provided("DEC", in_file)?;
-                println!(
-                    "Decrypting {} to file {} with key {}",
-                    in_file, out_file, key
-                );
+                validate::validate_params(None, None, Some(key), Some(in_file), out_file.as_deref())?;
+                let out = validate::create_output_file_if_not_provided("DEC", in_file, out_file.as_deref())?;
+                cryptor::decrypt_file(in_file, &out, key).expect("Decryption failed");
                 Ok(())
             }
         }
