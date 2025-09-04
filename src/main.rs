@@ -1,5 +1,6 @@
 mod validate;
 mod cryptor;
+mod key_manager;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]

@@ -2,15 +2,22 @@ use aes::Aes128;
 use aes::cipher::KeyInit;
 use std::fs::File;
 use std::io::{self, BufReader, BufWriter, Error, ErrorKind, Read, Write};
-
+use crate::key_manager::{verifier, generator};
 const BLOCK_SIZE: usize = 16;
+const SALT_SIZE: usize = 32;
+const VERIFIER_SIZE: usize = 32;
 pub fn encrypt_file(input_file: &str, output_file: &str, key: &str) -> io::Result<()> {
     let mut reader = BufReader::new(File::open(input_file)?);
     let mut writer = BufWriter::new(File::create(output_file)?);
 
     let mut buffer = [0u8; BLOCK_SIZE];
     let mut leftover = Vec::new();
+
     let key_bytes = key.as_bytes();
+    let salt = generator::generate_salt();
+    let hmac = verifier::create_verifier(key_bytes, &salt).expect("Error generating verifier");
+    writer.write_all(&salt)?;
+    writer.write_all(&hmac)?;
     loop {
         let bytes_read = reader.read(&mut buffer)?;
         if bytes_read == 0 {
@@ -42,6 +49,22 @@ pub fn decrypt_file(in_file: &str, out_file: &str, key: &str) -> io::Result<()> 
     let cipher = Aes128::new_from_slice(&key_bytes);
 
     let mut reader = BufReader::new(File::open(in_file)?);
+
+    let metadata = std::fs::metadata(in_file)?;
+    if metadata.len() < (SALT_SIZE + VERIFIER_SIZE) as u64 {
+        return Err(Error::new(ErrorKind::InvalidData, "Файл слишком маленький: нет места для соли и HMAC"));
+    }
+    let mut salt = [0u8; SALT_SIZE];
+    let mut stored_hmac = [0u8; VERIFIER_SIZE];
+    reader.read_exact(&mut salt)?;
+    reader.read_exact(&mut stored_hmac)?;
+
+    if !verifier::verify_key(key_bytes, &stored_hmac, &salt).map_err(|e| {
+        Error::new(ErrorKind::InvalidData, format!("Ошибка проверки ключа: {}", e))
+    })? {
+        return Err(Error::new(ErrorKind::InvalidData, "Неверный ключ!"));
+    }
+
     let mut writer = BufWriter::new(File::create(out_file)?);
 
     let mut buffer = [0u8; BLOCK_SIZE];
