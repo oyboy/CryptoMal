@@ -32,6 +32,16 @@ enum Commands {
         in_file: String,
         out_file: Option<String>,
     },
+    Derive {
+        #[arg(short, long)]
+        password: String,
+        #[arg(short, long)]
+        salt: String,
+        #[arg(short, long, default_value_t = 100_000)]
+        iterations: u32,
+        #[arg(short, long, default_value_t = 16)]
+        length: usize,
+    }
 }
 
 trait Command {
@@ -60,6 +70,18 @@ impl Command for Commands {
                 let cipher_mode = mode_from_str(mode)?;
                 let out = validate::create_output_file_if_not_provided("DEC", in_file, out_file.as_deref())?;
                 cryptor::decrypt_file(in_file, &out, key, cipher_mode).expect("Decryption failed");
+                Ok(())
+            }
+            Commands::Derive { password, salt, iterations, length } => {
+                log("running derive command...");
+                let key_bytes = key_manager::keygen::generate_key(
+                    password.as_bytes(),
+                    salt.as_bytes(),
+                    Some(*iterations),
+                    Some(*length),
+                ).map_err(|e| e.to_string())?;
+
+                println!("Generated key: {}", hex::encode(key_bytes));
                 Ok(())
             }
         }

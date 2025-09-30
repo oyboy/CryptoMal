@@ -3,12 +3,13 @@ use aes::cipher::{BlockEncrypt, BlockDecrypt, KeyInit, generic_array::GenericArr
 use cipher::{StreamCipher, KeyIvInit};
 use std::fs::File;
 use std::io::{self, BufReader, BufWriter, Error, ErrorKind, Read, Write};
-use crate::key_manager::verifier;
+use crate::key_manager::{verifier, keygen};
 use crate::generator;
 
 const BLOCK_SIZE: usize = 16;
 const SALT_SIZE: usize = 32;
 const VERIFIER_SIZE: usize = 32;
+const IV_SIZE: usize = 16;
 
 type Aes128Ctr = ctr::Ctr128BE<Aes128>;
 type Aes128Ofb = ofb::Ofb<Aes128>;
@@ -16,37 +17,33 @@ type Aes128Ofb = ofb::Ofb<Aes128>;
 #[derive(Clone, Copy, Debug)]
 pub enum CipherMode { ECB, CBC, CTR, OFB }
 
-pub fn encrypt_file(input_file: &str, output_file: &str, key: &str, mode: CipherMode) -> io::Result<()> {
-    let key_bytes = key.as_bytes();
-    if key_bytes.len() != 16 {
-        return Err(Error::new(ErrorKind::InvalidInput, "AES-128 требует ключ ровно 16 байт"));
-    }
-
+pub fn encrypt_file(input_file: &str, output_file: &str, password: &str, mode: CipherMode) -> io::Result<()> {
     let mut reader = BufReader::new(File::open(input_file)?);
     let mut writer = BufWriter::new(File::create(output_file)?);
 
-    let salt = generator::generate_salt();
-    let hmac = verifier::create_verifier(key_bytes, &salt)
+    let salt: [u8; SALT_SIZE] = generator::generate_random_bytes(SALT_SIZE).try_into().expect("salt must be 32 bytes");
+    let key_bytes = keygen::generate_key(password.as_bytes(), &salt, None, None)?;
+    let hmac = verifier::create_verifier(&key_bytes, &salt)
         .map_err(|e| Error::new(ErrorKind::Other, format!("verifier: {e}")))?;
     writer.write_all(&salt)?;
     writer.write_all(&hmac)?;
 
     match mode {
-        CipherMode::ECB => encrypt_ecb(&mut reader, &mut writer, key_bytes),
+        CipherMode::ECB => encrypt_ecb(&mut reader, &mut writer, &key_bytes),
         CipherMode::CBC => {
-            let iv = generator::generate_iv();
+            let iv: [u8; IV_SIZE] = generator::generate_random_bytes(IV_SIZE).try_into().expect("Failed to convert bytes vector in IV");
             writer.write_all(&iv)?;
-            encrypt_cbc(&mut reader, &mut writer, key_bytes, &iv)
+            encrypt_cbc(&mut reader, &mut writer, &key_bytes, &iv)
         }
         CipherMode::CTR => {
-            let iv = generator::generate_iv();
+            let iv = generator::generate_random_bytes(IV_SIZE);
             writer.write_all(&iv)?;
-            encrypt_stream(&mut reader, &mut writer, Aes128Ctr::new_from_slices(key_bytes, &iv).unwrap())
+            encrypt_stream(&mut reader, &mut writer, Aes128Ctr::new_from_slices(&key_bytes, &iv).unwrap())
         }
         CipherMode::OFB => {
-            let iv = generator::generate_iv();
+            let iv = generator::generate_random_bytes(IV_SIZE);
             writer.write_all(&iv)?;
-            encrypt_stream(&mut reader, &mut writer, Aes128Ofb::new_from_slices(key_bytes, &iv).unwrap())
+            encrypt_stream(&mut reader, &mut writer, Aes128Ofb::new_from_slices(&key_bytes, &iv).unwrap())
         }
     }?;
 
@@ -54,12 +51,7 @@ pub fn encrypt_file(input_file: &str, output_file: &str, key: &str, mode: Cipher
     Ok(())
 }
 
-pub fn decrypt_file(in_file: &str, out_file: &str, key: &str, mode: CipherMode) -> io::Result<()> {
-    let key_bytes = key.as_bytes();
-    if key_bytes.len() != 16 {
-        return Err(Error::new(ErrorKind::InvalidInput, "AES-128 требует ключ ровно 16 байт"));
-    }
-
+pub fn decrypt_file(in_file: &str, out_file: &str, password: &str, mode: CipherMode) -> io::Result<()> {
     let meta = std::fs::metadata(in_file)?;
     if meta.len() < (SALT_SIZE + VERIFIER_SIZE) as u64 {
         return Err(Error::new(ErrorKind::InvalidData, "слишком мало данных для salt+hmac"));
@@ -72,28 +64,30 @@ pub fn decrypt_file(in_file: &str, out_file: &str, key: &str, mode: CipherMode) 
     let mut stored_hmac = [0u8; VERIFIER_SIZE];
     reader.read_exact(&mut salt)?;
     reader.read_exact(&mut stored_hmac)?;
-    let ok = verifier::verify_key(key_bytes, &stored_hmac, &salt)
+    
+    let key_bytes = keygen::generate_key(password.as_bytes(), &salt, None, None)?;
+    let ok = verifier::verify_key(&key_bytes, &stored_hmac, &salt)
         .map_err(|e| Error::new(ErrorKind::InvalidData, format!("Ошибка проверки ключа: {e}")))?;
     if !ok {
         return Err(Error::new(ErrorKind::InvalidData, "Неверный ключ"));
     }
 
     match mode {
-        CipherMode::ECB => decrypt_ecb(&mut reader, &mut writer, key_bytes),
+        CipherMode::ECB => decrypt_ecb(&mut reader, &mut writer, &key_bytes),
         CipherMode::CBC => {
             let mut iv = [0u8; BLOCK_SIZE];
             reader.read_exact(&mut iv)?;
-            decrypt_cbc(&mut reader, &mut writer, key_bytes, &iv)
+            decrypt_cbc(&mut reader, &mut writer, &key_bytes, &iv)
         }
         CipherMode::CTR => {
             let mut iv = [0u8; BLOCK_SIZE];
             reader.read_exact(&mut iv)?;
-            decrypt_stream(&mut reader, &mut writer, Aes128Ctr::new_from_slices(key_bytes, &iv).unwrap())
+            decrypt_stream(&mut reader, &mut writer, Aes128Ctr::new_from_slices(&key_bytes, &iv).unwrap())
         }
         CipherMode::OFB => {
             let mut iv = [0u8; BLOCK_SIZE];
             reader.read_exact(&mut iv)?;
-            decrypt_stream(&mut reader, &mut writer, Aes128Ofb::new_from_slices(key_bytes, &iv).unwrap())
+            decrypt_stream(&mut reader, &mut writer, Aes128Ofb::new_from_slices(&key_bytes, &iv).unwrap())
         }
     }?;
 

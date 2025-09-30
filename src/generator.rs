@@ -1,15 +1,22 @@
 use rand::rngs::OsRng;
 use rand::TryRngCore;
-
-const SALT_SIZE: usize = 32;
-const IV_SIZE: usize = 16;
-pub fn generate_salt() -> [u8; SALT_SIZE] {
-    let mut salt = [0u8; SALT_SIZE];
-    OsRng.try_fill_bytes(&mut salt).expect("Error salt generation");
-    salt
+pub fn generate_random_bytes(len: usize) -> Vec<u8> {
+    let mut bytes = vec![0u8; len];
+    OsRng.try_fill_bytes(&mut bytes).expect("Error random generation");
+    bytes
 }
-pub fn generate_iv() -> [u8; IV_SIZE] {
-    let mut iv = [0u8; IV_SIZE];
-    OsRng.try_fill_bytes(&mut iv).expect("Error iv generation");
-    iv
+#[cfg(test)]
+mod tests {
+    use crate::generator::generate_random_bytes;
+    use std::collections::HashSet;
+
+    const COUNT: usize = 1000;
+    #[test]
+    fn statistical_test() {
+        let mut generated_byte_sequences = HashSet::new();
+        for _i in 0..COUNT {
+            generated_byte_sequences.insert(generate_random_bytes(16));
+        }
+        assert_eq!(generated_byte_sequences.len(), COUNT);
+    }
 }

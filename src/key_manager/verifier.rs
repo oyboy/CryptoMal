@@ -1,5 +1,5 @@
 use sha2::Sha256;
-use hmac::{Hmac, KeyInit, Mac};
+use hmac::{Hmac, Mac};
 use std::io::{Error, ErrorKind};
 const VERIFIER_SIZE: usize = 32;
 type HmacSha256 = Hmac<Sha256>;

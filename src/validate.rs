@@ -1,14 +1,14 @@
 use std::path::Path;
 use std::fs::File;
-pub fn validate_params(algorithm: Option<&str>, key: Option<&str>, in_file: Option<&str>, out_file: Option<&str>) -> Result<(), String> {
+pub fn validate_params(algorithm: Option<&str>, password: Option<&str>, in_file: Option<&str>, out_file: Option<&str>) -> Result<(), String> {
     if let Some(alg) = algorithm {
         if alg != "AES" {
             return Err(format!("Unsupported algorithm: {}", alg));
         }
     }
-    if let Some(k) = key {
-        if k.len() < 16 {
-            return Err("Key must be at least 16 bytes".to_string());
+    if let Some(k) = password {
+        if k.len() < 4 {
+            return Err("Password must be at least 4 bytes".to_string());
         }
     }
     if let Some(file) = in_file {
