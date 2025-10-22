@@ -9,6 +9,7 @@ use crate::generator;
 const BLOCK_SIZE: usize = 16;
 const SALT_SIZE: usize = 32;
 const VERIFIER_SIZE: usize = 32;
+const BUFFER_SIZE: usize = 1_048_576;
 
 type Aes128Ctr = ctr::Ctr128BE<Aes128>;
 type Aes128Ofb = ofb::Ofb<Aes128>;
@@ -32,9 +33,9 @@ pub fn encrypt_file(input_file: &str, output_file: &str, password: Option<&str>,
     let mut writer = BufWriter::new(File::create(output_file)?);
 
     let salt: [u8; SALT_SIZE] = generator::generate_random_bytes(SALT_SIZE).try_into().expect("salt must be 32 bytes");
-    
+
     let key_bytes = derive_effective_key(password, key_bytes, &salt)?;
-    
+
     let hmac = verifier::create_verifier(&key_bytes, &salt)
         .map_err(|e| Error::new(ErrorKind::Other, format!("verifier: {e}")))?;
     writer.write_all(&salt)?;
@@ -75,7 +76,7 @@ pub fn decrypt_file(in_file: &str, out_file: &str, password: Option<&str>, key_b
     reader.read_exact(&mut stored_hmac)?;
 
     let key_bytes = derive_effective_key(password, key_bytes, &salt)?;
-    
+
     let ok = verifier::verify_key(&key_bytes, &stored_hmac, &salt)
         .map_err(|e| Error::new(ErrorKind::InvalidData, format!("Ошибка проверки ключа: {e}")))?;
     if !ok {
@@ -102,100 +103,142 @@ pub fn decrypt_file(in_file: &str, out_file: &str, password: Option<&str>, key_b
     Ok(())
 }
 
+fn process_ecb_blocks<W: Write>(chunks: &mut std::slice::ChunksExact<'_, u8>, cipher: &Aes128, writer: &mut W) -> io::Result<()> {
+    for chunk in chunks.by_ref() {
+        let block_arr: [u8; BLOCK_SIZE] = chunk.try_into().unwrap();
+        let enc = aes_encrypt_block(cipher, &block_arr);
+        writer.write_all(&enc)?;
+    }
+    Ok(())
+}
+
+fn process_cbc_blocks<W: Write>(chunks: &mut std::slice::ChunksExact<'_, u8>, cipher: &Aes128, writer: &mut W, prev: &mut [u8; BLOCK_SIZE]) -> io::Result<()> {
+    for chunk in chunks.by_ref() {
+        let block_arr: [u8; BLOCK_SIZE] = chunk.try_into().unwrap();
+        let x = xor16(&block_arr, prev);
+        let enc = aes_encrypt_block(cipher, &x);
+        writer.write_all(&enc)?;
+        *prev = enc;
+    }
+    Ok(())
+}
+
+fn process_decrypt_ecb_blocks<W: Write>(chunks: std::slice::ChunksExact<'_, u8>, cipher: &Aes128, writer: &mut W, last_plain: &mut Option<[u8; BLOCK_SIZE]>) -> io::Result<()> {
+    for chunk in chunks {
+        let ct: [u8; BLOCK_SIZE] = chunk.try_into().unwrap();
+        let plain = aes_decrypt_block(cipher, &ct);
+        if let Some(p) = last_plain.take() {
+            writer.write_all(&p)?;
+        }
+        *last_plain = Some(plain);
+    }
+    Ok(())
+}
+
+fn process_decrypt_cbc_blocks<W: Write>(chunks: std::slice::ChunksExact<'_, u8>, cipher: &Aes128, writer: &mut W, last_plain: &mut Option<[u8; BLOCK_SIZE]>, prev_ct: &mut [u8; BLOCK_SIZE]) -> io::Result<()> {
+    for chunk in chunks {
+        let ct: [u8; BLOCK_SIZE] = chunk.try_into().unwrap();
+        let dec = aes_decrypt_block(cipher, &ct);
+        let plain = xor16(&dec, prev_ct);
+        if let Some(p) = last_plain.take() {
+            writer.write_all(&p)?;
+        }
+        *last_plain = Some(plain);
+        *prev_ct = ct;
+    }
+    Ok(())
+}
 
 fn encrypt_ecb<R: Read, W: Write>(reader: &mut R, writer: &mut W, key: &[u8]) -> io::Result<()> {
     let cipher = Aes128::new_from_slice(key).unwrap();
-    let mut buf = [0u8; BLOCK_SIZE];
-    let mut leftover = Vec::new();
+    let mut remainder = Vec::new();
+    let mut buffer = vec![0u8; BUFFER_SIZE];
 
     loop {
-        let n = reader.read(&mut buf)?;
-        if n == 0 { break; }
-        if n < BLOCK_SIZE {
-            leftover.extend_from_slice(&buf[..n]);
+        let n = reader.read(&mut buffer)?;
+        if n == 0 {
             break;
         }
-        let enc = aes_encrypt_block(&cipher, &buf);
-        writer.write_all(&enc)?;
+        remainder.extend_from_slice(&buffer[..n]);
+        let mut chunks = remainder.chunks_exact(BLOCK_SIZE);
+        process_ecb_blocks(&mut chunks, &cipher, writer)?;
+        remainder = chunks.remainder().to_vec();
     }
 
-    let padded = pad_pkcs7(leftover);
-    let enc = aes_encrypt_block(&cipher, &padded);
-    writer.write_all(&enc)?;
+    // Pad and encrypt the remainder (always pad, even if empty)
+    let pad_len = BLOCK_SIZE - (remainder.len() % BLOCK_SIZE);
+    remainder.extend(std::iter::repeat(pad_len as u8).take(pad_len));
+    let mut chunks = remainder.chunks_exact(BLOCK_SIZE);
+    process_ecb_blocks(&mut chunks, &cipher, writer)?;
     Ok(())
 }
 
 fn decrypt_ecb<R: Read, W: Write>(reader: &mut R, writer: &mut W, key: &[u8]) -> io::Result<()> {
     let cipher = Aes128::new_from_slice(key).unwrap();
-    let mut buf = [0u8; BLOCK_SIZE];
-    let mut prev: Option<[u8; BLOCK_SIZE]> = None;
+    let mut last_plain: Option<[u8; BLOCK_SIZE]> = None;
+    let mut buffer = vec![0u8; BUFFER_SIZE];
 
     loop {
-        let n = reader.read(&mut buf)?;
-        if n == 0 { break; }
-        if n < BLOCK_SIZE {
-            return Err(Error::new(ErrorKind::InvalidData, "неполный блок в ECB"));
+        let n = reader.read(&mut buffer)?;
+        if n == 0 {
+            break;
         }
-        let dec = aes_decrypt_block(&cipher, &buf);
-
-        if let Some(p) = prev.take() { writer.write_all(&p)?; }
-        prev = Some(dec);
+        if n % BLOCK_SIZE != 0 {
+            return Err(Error::new(ErrorKind::InvalidData, "Input not multiple of block size"));
+        }
+        process_decrypt_ecb_blocks(buffer[..n].chunks_exact(BLOCK_SIZE), &cipher, writer, &mut last_plain)?;
     }
 
-    if let Some(last) = prev {
+    if let Some(last) = last_plain {
         let unpadded = unpad_pkcs7(&last)?;
         writer.write_all(&unpadded)?;
     }
     Ok(())
 }
 
-
 fn encrypt_cbc<R: Read, W: Write>(reader: &mut R, writer: &mut W, key: &[u8], iv: &[u8; BLOCK_SIZE]) -> io::Result<()> {
     let cipher = Aes128::new_from_slice(key).unwrap();
-    let mut buf = [0u8; BLOCK_SIZE];
-    let mut leftover = Vec::new();
     let mut prev = *iv;
+    let mut remainder = Vec::new();
+    let mut buffer = vec![0u8; BUFFER_SIZE];
 
     loop {
-        let n = reader.read(&mut buf)?;
-        if n == 0 { break; }
-        if n < BLOCK_SIZE {
-            leftover.extend_from_slice(&buf[..n]);
+        let n = reader.read(&mut buffer)?;
+        if n == 0 {
             break;
         }
-        let x = xor16(&buf, &prev);
-        let enc = aes_encrypt_block(&cipher, &x);
-        writer.write_all(&enc)?;
-        prev = enc;
+        remainder.extend_from_slice(&buffer[..n]);
+        let mut chunks = remainder.chunks_exact(BLOCK_SIZE);
+        process_cbc_blocks(&mut chunks, &cipher, writer, &mut prev)?;
+        remainder = chunks.remainder().to_vec();
     }
 
-    let padded = pad_pkcs7(leftover);
-    let x = xor16(&padded, &prev);
-    let enc = aes_encrypt_block(&cipher, &x);
-    writer.write_all(&enc)?;
+    // Pad and encrypt the remainder (always pad, even if empty)
+    let pad_len = BLOCK_SIZE - (remainder.len() % BLOCK_SIZE);
+    remainder.extend(std::iter::repeat(pad_len as u8).take(pad_len));
+    let mut chunks = remainder.chunks_exact(BLOCK_SIZE);
+    process_cbc_blocks(&mut chunks, &cipher, writer, &mut prev)?;
     Ok(())
 }
 
 fn decrypt_cbc<R: Read, W: Write>(reader: &mut R, writer: &mut W, key: &[u8], iv: &[u8; BLOCK_SIZE]) -> io::Result<()> {
     let cipher = Aes128::new_from_slice(key).unwrap();
-    let mut buf = [0u8; BLOCK_SIZE];
     let mut prev_ct = *iv;
-    let mut prev_plain: Option<[u8; BLOCK_SIZE]> = None;
+    let mut last_plain: Option<[u8; BLOCK_SIZE]> = None;
+    let mut buffer = vec![0u8; BUFFER_SIZE];
 
     loop {
-        let n = reader.read(&mut buf)?;
-        if n == 0 { break; }
-        if n < BLOCK_SIZE { return Err(Error::new(ErrorKind::InvalidData, "неполный блок в CBC")); }
-
-        let dec = aes_decrypt_block(&cipher, &buf);
-        let plain = xor16(&dec, &prev_ct);
-
-        if let Some(p) = prev_plain.take() { writer.write_all(&p)?; }
-        prev_plain = Some(plain);
-        prev_ct = buf;
+        let n = reader.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        if n % BLOCK_SIZE != 0 {
+            return Err(Error::new(ErrorKind::InvalidData, "Input not multiple of block size"));
+        }
+        process_decrypt_cbc_blocks(buffer[..n].chunks_exact(BLOCK_SIZE), &cipher, writer, &mut last_plain, &mut prev_ct)?;
     }
 
-    if let Some(last) = prev_plain {
+    if let Some(last) = last_plain {
         let unpadded = unpad_pkcs7(&last)?;
         writer.write_all(&unpadded)?;
     }
@@ -203,26 +246,26 @@ fn decrypt_cbc<R: Read, W: Write>(reader: &mut R, writer: &mut W, key: &[u8], iv
 }
 
 fn encrypt_stream<R: Read, W: Write, C: StreamCipher>(reader: &mut R, writer: &mut W, mut cipher: C) -> io::Result<()> {
-    let mut buf = [0u8; 8192];
+    let mut buf = vec![0u8; BUFFER_SIZE];
     loop {
         let n = reader.read(&mut buf)?;
         if n == 0 { break; }
-        let mut chunk = &mut buf[..n];
-        cipher.apply_keystream(&mut chunk);
-        writer.write_all(&chunk)?;
+        cipher.apply_keystream(&mut buf[..n]);
+        writer.write_all(&buf[..n])?;
     }
     Ok(())
 }
+
 fn decrypt_stream<R: Read, W: Write, C: StreamCipher>(reader: &mut R, writer: &mut W, cipher: C) -> io::Result<()> {
     encrypt_stream(reader, writer, cipher)
 }
-
 
 fn aes_encrypt_block(cipher: &Aes128, input: &[u8; BLOCK_SIZE]) -> [u8; BLOCK_SIZE] {
     let mut block = GenericArray::clone_from_slice(input);
     cipher.encrypt_block(&mut block);
     block.into()
 }
+
 fn aes_decrypt_block(cipher: &Aes128, input: &[u8; BLOCK_SIZE]) -> [u8; BLOCK_SIZE] {
     let mut block = GenericArray::clone_from_slice(input);
     cipher.decrypt_block(&mut block);
@@ -235,13 +278,6 @@ fn xor16(a: &[u8; BLOCK_SIZE], b: &[u8; BLOCK_SIZE]) -> [u8; BLOCK_SIZE] {
     out
 }
 
-fn pad_pkcs7(mut tail: Vec<u8>) -> [u8; BLOCK_SIZE] {
-    let pad = BLOCK_SIZE - (tail.len() % BLOCK_SIZE);
-    tail.extend(std::iter::repeat(pad as u8).take(pad));
-    let mut arr = [0u8; BLOCK_SIZE];
-    arr.copy_from_slice(&tail[..BLOCK_SIZE]);
-    arr
-}
 fn unpad_pkcs7(block: &[u8; BLOCK_SIZE]) -> io::Result<Vec<u8>> {
     let pad = block[BLOCK_SIZE - 1] as usize;
     if pad == 0 || pad > BLOCK_SIZE { return Err(Error::new(ErrorKind::InvalidData, "некорректный PKCS#7")); }
