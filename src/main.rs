@@ -20,15 +20,23 @@ enum Commands {
         #[arg(short, long, default_value = "ECB")]
         mode: String,
         #[arg(short, long)]
-        key: String,
+        key: Option<String>,
+        #[arg(long)]
+        password: Option<String>,
+        #[arg(long)]
+        iv: Option<String>,
         in_file: String,
         out_file: Option<String>,
     },
     Decrypt {
         #[arg(short, long)]
-        key: String,
+        key: Option<String>,
+        #[arg(long)]
+        password: Option<String>,
         #[arg(short, long, default_value = "ECB")]
         mode: String,
+        #[arg(long)]
+        iv: Option<String>,
         in_file: String,
         out_file: Option<String>,
     },
@@ -56,22 +64,48 @@ impl Command for Commands {
             }
         };
         match self {
-            Commands::Encrypt { algorithm, mode, key, in_file, out_file } => {
-                log("running encrypt command...");
-                validate::validate_params(Some(algorithm), Some(key), Some(in_file), out_file.as_deref())?;
-                let cipher_mode = mode_from_str(mode)?;
-                let out = validate::create_output_file_if_not_provided("ENC", in_file, out_file.as_deref())?;
-                cryptor::encrypt_file(in_file, &out, key, cipher_mode).expect("Encryption failed");
+            Commands::Encrypt { algorithm, mode, key, password, iv, in_file, out_file } => {
+                let iv_bytes = iv.as_ref().map(|hex| hex::decode(hex).expect("Invalid IV hex"));
+                let key_bytes = key.as_ref().map(|hex| hex::decode(hex).expect("Invalid key hex"));
+
+                let params = validate::Params {
+                    algorithm: Some(algorithm),
+                    password: password.as_deref(),
+                    key: key_bytes,
+                    in_file: Some(in_file),
+                    out_file: out_file.as_deref(),
+                    iv: iv_bytes,
+                    mode: Some(mode),
+                };
+                let v = params.finalize()?;
+
+                let cipher_mode = mode_from_str(&v.mode)?;
+                cryptor::encrypt_file(&v.in_file, &v.out_file, v.password.as_deref(), v.key_bytes.as_deref(), cipher_mode, v.iv)
+                    .expect("Encryption failed");
                 Ok(())
             }
-            Commands::Decrypt {key, mode, in_file, out_file } => {
-                log("running decrypt command...");
-                validate::validate_params(None, Some(key), Some(in_file), out_file.as_deref())?;
+
+            Commands::Decrypt { key, password, mode, iv, in_file, out_file } => {
+                let iv_bytes = iv.as_ref().map(|hex| hex::decode(hex).expect("Invalid IV hex string"));
+                let key_bytes = key.as_ref().map(|hex| hex::decode(hex).expect("Invalid key hex"));
+
+                let params = validate::Params {
+                    algorithm: None,
+                    password: password.as_deref(),
+                    key: key_bytes,
+                    in_file: Some(in_file),
+                    out_file: out_file.as_deref(),
+                    iv: iv_bytes,
+                    mode: Some(mode),
+                };
+                let v = params.finalize()?;
+
                 let cipher_mode = mode_from_str(mode)?;
-                let out = validate::create_output_file_if_not_provided("DEC", in_file, out_file.as_deref())?;
-                cryptor::decrypt_file(in_file, &out, key, cipher_mode).expect("Decryption failed");
+                cryptor::decrypt_file(&v.in_file, &v.out_file, v.password.as_deref(), v.key_bytes.as_deref(), cipher_mode, v.iv)
+                    .expect("Decryption failed");
                 Ok(())
             }
+
             Commands::Derive { password, salt, iterations, length } => {
                 log("running derive command...");
                 let key_bytes = key_manager::keygen::generate_key(
