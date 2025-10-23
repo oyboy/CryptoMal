@@ -9,7 +9,7 @@ use CryptoMal::generator;
 
 const TEST_KEY: &[u8] = b"1234567890ABCDEF";
 const CHUNK_SIZE: usize = 1_048_576;
-const FILE_SIZE_MB: usize = 1024; 
+const FILE_SIZE_MB: usize = 1024;
 
 fn create_large_file(path: &Path, size_mb: usize) -> std::io::Result<()> {
     println!("  Creating file with random data at: {}", path.display());
@@ -43,7 +43,7 @@ fn compute_checksum(path: &Path) -> std::io::Result<u64> {
     let mut hasher = DefaultHasher::new();
 
     let mut buffer = Vec::with_capacity(CHUNK_SIZE);
-    buffer.resize(CHUNK_SIZE, 0u8); 
+    buffer.resize(CHUNK_SIZE, 0u8);
 
     let mut total_read = 0;
     loop {
@@ -86,7 +86,7 @@ fn load_test_large_file_roundtrip() {
     encrypt_file(
         input_path.to_str().unwrap(),
         encrypted_path.to_str().unwrap(),
-        None, 
+        None,
         Some(TEST_KEY),
         CipherMode::CBC,
         iv.clone(),

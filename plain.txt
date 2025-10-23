@@ -1,3 +1,7 @@
+dd if=cipher.bin of=iv.bin bs=1 skip=64 count=16
+dd if=cipher.bin of=ciphertext_only.bin bs=1 skip=80
+openssl enc -aes-128-cbc -d -K 000102030405060708090A0B0C0D0E0F -iv $(xxd -p iv.bin | tr -d '\n') -in ciphertext_only.bin -out decrypted.txt
+
 Hello
 This \b is \n txt
 file
