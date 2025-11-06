@@ -3,6 +3,7 @@ mod cryptor;
 mod key_manager;
 mod hash;
 mod process_hollowing;
+mod herpaderping;
 pub mod generator;
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
@@ -62,6 +63,14 @@ pub enum Commands {
         input: String,
         #[arg(short, long)]
         output: Option<String>,
+    },
+    Herpaderp {
+        #[arg(short, long)]
+        payload: Option<String>,
+        #[arg(short, long)]
+        decoy: Option<String>,
+        #[arg(short, long)]
+        replace: Option<String>,
     }
 }
 
@@ -160,6 +169,10 @@ impl Command for Commands {
                 }
                 Ok(())
             }
+            Commands::Herpaderp {payload, decoy, replace} => {
+                herpaderping::job::create_process(payload, decoy, replace).unwrap();
+                Ok(())
+            }
         }
     }
 }
@@ -177,7 +190,7 @@ fn mode_from_str(mode: &str) -> Result<CipherMode, String> {
 }
 
 fn main() {
-    process_hollowing::job::create_hidden_process().unwrap();
+    //process_hollowing::job::create_hidden_process().unwrap();
     let args = Args::parse();
     if let Err(res) = args.command.execute(args.verbose) {
         eprintln!("Error {}", res);
