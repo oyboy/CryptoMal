@@ -52,19 +52,19 @@
 ### Команды
 - **Шифрование файла** (с паролем):
   ```bash
-  cryptocore -- encrypt --password mysecret --mode CBC input.txt output.enc
+  cryptocore encrypt --password mysecret --mode CBC input.txt output.enc
   ```
 - **Дешифрование**:
   ```bash
-  cryptocore -- decrypt --password mysecret --mode CBC output.enc decrypted.txt
+  cryptocore decrypt --password mysecret --mode CBC output.enc decrypted.txt
   ```
 - **Генерация ключа**:
   ```bash
-  cryptocore -- derive --password mypass --salt mysalt --iterations 100000 --length 32
+  cryptocore derive --password mypass --salt mysalt --iterations 100000 --length 32
   ```
 - **Хэширование файла**:
   ```bash
-  cryptocore -- dgst --algorithm sha256 input.txt
+  cryptocore dgst --algorithm sha256 input.txt
   ```
   
 - 🎭 **Herpaderping**:
