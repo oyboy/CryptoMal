@@ -52,19 +52,19 @@
 ### Команды
 - **Шифрование файла** (с паролем):
   ```bash
-  cargo run -- encrypt --password mysecret --mode CBC input.txt output.enc
+  cryptocore -- encrypt --password mysecret --mode CBC input.txt output.enc
   ```
 - **Дешифрование**:
   ```bash
-  cargo run -- decrypt --password mysecret --mode CBC output.enc decrypted.txt
+  cryptocore -- decrypt --password mysecret --mode CBC output.enc decrypted.txt
   ```
 - **Генерация ключа**:
   ```bash
-  cargo run -- derive --password mypass --salt mysalt --iterations 100000 --length 32
+  cryptocore -- derive --password mypass --salt mysalt --iterations 100000 --length 32
   ```
 - **Хэширование файла**:
   ```bash
-  cargo run -- dgst --algorithm sha256 input.txt
+  cryptocore -- dgst --algorithm sha256 input.txt
   ```
   
 - 🎭 **Herpaderping**:
