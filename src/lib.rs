@@ -5,3 +5,5 @@ pub mod hash;
 mod validate;
 pub mod process_hollowing;
 pub mod herpaderping;
+
+pub mod mac;

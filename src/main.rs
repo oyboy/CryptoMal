@@ -4,12 +4,15 @@ mod key_manager;
 mod hash;
 mod process_hollowing;
 mod herpaderping;
+
+mod mac;
 pub mod generator;
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
 use clap::{Parser, Subcommand};
 use cryptor::CipherMode;
 use hash::{Hasher, Sha256, Sha3};
+use mac::{hmac::Hmac};
 
 #[derive(Parser)]
 pub struct Args {
@@ -63,6 +66,12 @@ pub enum Commands {
         input: String,
         #[arg(short, long)]
         output: Option<String>,
+        #[arg(long)]
+        hmac: bool,
+        #[arg(short, long, required_if_eq("hmac", "true"))]
+        key: Option<String>,
+        #[arg(long)]
+        verify: Option<String>,
     },
     Herpaderp {
         #[arg(short, long)]
@@ -140,32 +149,66 @@ impl Command for Commands {
                 println!("Generated key: {}", hex::encode(key_bytes));
                 Ok(())
             }
-            
-            Commands::Dgst {algorithm, input, output} => {
+
+            Commands::Dgst { algorithm, input, output, hmac, key, verify } => {
                 let file = File::open(input).map_err(|e| e.to_string())?;
-                
                 let mut reader = BufReader::new(file);
-                let mut hasher: Box<dyn Hasher> = match algorithm.as_str() {
-                    "sha256" => Box::new(Sha256::new()),
-                    "sha3-256" => Box::new(Sha3::new()),
-                    _ => return Err("Unsupported algorithm".to_string()),
-                };
-                
                 let mut buf = [0u8; 8192];
-                loop {
-                    let n = reader.read(&mut buf).map_err(|e| e.to_string())?;
-                    if n == 0 { break;}
-                    hasher.update(&buf[..n]);
-                }
-                
-                let hash = hasher.finalize();
-                let out_str = format!("{}\n", hash);
-                
-                if let Some(o) = output {
-                    let mut out_file = File::create(o).map_err(|e| e.to_string())?;
-                    out_file.write_all(out_str.as_bytes()).map_err(|e| e.to_string())?;
+
+                let result_hex = if *hmac {
+                    let key_hex = key.as_ref().ok_or("Key is required for HMAC mode")?;
+                    let key_bytes = hex::decode(key_hex).map_err(|_| "Invalid key hex string")?;
+                    
+                    let mut hmac_instance = Hmac::new(&key_bytes, algorithm)
+                        .map_err(|e| e)?;
+
+                    loop {
+                        let n = reader.read(&mut buf).map_err(|e| e.to_string())?;
+                        if n == 0 { break; }
+                        hmac_instance.update(&buf[..n]);
+                    }
+                    hmac_instance.finalize()
                 } else {
-                    println!("{}", out_str);
+                    let mut hasher: Box<dyn Hasher> = match algorithm.as_str() {
+                        "sha256" => Box::new(Sha256::new()),
+                        "sha3-256" => Box::new(Sha3::new()),
+                        _ => return Err("Unsupported algorithm".to_string()),
+                    };
+
+                    loop {
+                        let n = reader.read(&mut buf).map_err(|e| e.to_string())?;
+                        if n == 0 { break; }
+                        hasher.update(&buf[..n]);
+                    }
+                    hasher.finalize().to_string()
+                };
+
+                if let Some(verify_file_path) = verify {
+                    let verify_file = File::open(verify_file_path).map_err(|e| format!("Failed to open verify file: {}", e))?;
+                    let mut verify_reader = BufReader::new(verify_file);
+                    let mut expected_content = String::new();
+                    verify_reader.read_to_string(&mut expected_content).map_err(|e| e.to_string())?;
+
+                    let expected_hash = expected_content
+                        .split_whitespace()
+                        .next()
+                        .ok_or("Invalid verification file format")?;
+
+                    if result_hex.eq_ignore_ascii_case(expected_hash) {
+                        println!("[OK] HMAC verification successful");
+                    } else {
+                        eprintln!("[ERROR] HMAC verification failed");
+                        std::process::exit(1);
+                    }
+                } else {
+                    let out_str = format!("{} {}\n", result_hex, input);
+
+                    if let Some(o) = output {
+                        let mut out_file = File::create(o).map_err(|e| e.to_string())?;
+                        out_file.write_all(out_str.as_bytes()).map_err(|e| e.to_string())?;
+                    } else {
+                        print!("{}", out_str);
+                    }
                 }
                 Ok(())
             }
