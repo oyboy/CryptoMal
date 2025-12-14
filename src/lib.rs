@@ -7,3 +7,5 @@ pub mod process_hollowing;
 pub mod herpaderping;
 
 pub mod mac;
+
+pub mod gcm;
