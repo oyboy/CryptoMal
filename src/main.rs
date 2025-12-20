@@ -8,13 +8,14 @@ mod gcm;
 
 mod mac;
 pub mod generator;
+
 use std::fs::{self, File};
 use std::io::{BufReader, Read, Write};
 use std::path::Path;
 use clap::{Parser, Subcommand};
 use cryptor::CipherMode;
 use hash::{Hasher, Sha256, Sha3};
-use mac::{hmac::Hmac};
+use mac::hmac::Hmac;
 use crate::gcm::Gcm;
 use rand::{Rng, rng};
 
@@ -22,42 +23,36 @@ use rand::{Rng, rng};
 pub struct Args {
     #[arg(short, long)]
     verbose: bool,
+
+    #[arg(long, group = "action")]
+    encrypt: bool,
+    #[arg(long, group = "action")]
+    decrypt: bool,
+
+    #[arg(short, long, default_value = "AES")]
+    algorithm: String,
+    #[arg(short, long, default_value = "ECB")]
+    mode: String,
+    #[arg(short, long)]
+    key: Option<String>,
+    #[arg(long)]
+    password: Option<String>,
+    #[arg(long)]
+    iv: Option<String>,
+    #[arg(long)]
+    aad: Option<String>,
+
+    #[arg(short, long)]
+    input: Option<String>,
+    #[arg(short, long)]
+    output: Option<String>,
+
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
 pub enum Commands {
-    Encrypt {
-        #[arg(short, long, default_value = "AES")]
-        algorithm: String,
-        #[arg(short, long, default_value = "ECB")]
-        mode: String,
-        #[arg(short, long)]
-        key: Option<String>,
-        #[arg(long)]
-        password: Option<String>,
-        #[arg(long)]
-        iv: Option<String>,
-        #[arg(long)]
-        aad: Option<String>,
-        in_file: String,
-        out_file: Option<String>,
-    },
-    Decrypt {
-        #[arg(short, long)]
-        key: Option<String>,
-        #[arg(long)]
-        password: Option<String>,
-        #[arg(short, long, default_value = "ECB")]
-        mode: String,
-        #[arg(long)]
-        iv: Option<String>,
-        #[arg(long)]
-        aad: Option<String>,
-        in_file: String,
-        out_file: Option<String>,
-    },
     Derive {
         #[arg(short, long)]
         password: String,
@@ -81,165 +76,30 @@ pub enum Commands {
         key: Option<String>,
         #[arg(long)]
         verify: Option<String>,
-    },
-    Herpaderp {
-        #[arg(short, long)]
-        payload: Option<String>,
-        #[arg(short, long)]
-        decoy: Option<String>,
-        #[arg(short, long)]
-        replace: Option<String>,
     }
 }
 
-trait Command {
-    fn execute(&self, verbose: bool) -> Result<(), String>;
+fn mode_from_str(mode: &str) -> Result<CipherMode, String> {
+    match mode.to_uppercase().as_str() {
+        "ECB" => Ok(CipherMode::ECB),
+        "CBC" => Ok(CipherMode::CBC),
+        "CTR" => Ok(CipherMode::CTR),
+        "OFB" => Ok(CipherMode::OFB),
+        _ => Err(format!("Unsupported mode: {}", mode)),
+    }
 }
 
-impl Command for Commands {
-    fn execute(&self, verbose: bool) -> Result<(), String> {
-        let log = |msg: &str| {
-            if verbose {
-                println!("Log: {}", msg);
-            }
-        };
-        match self {
-            Commands::Encrypt { algorithm, mode, key, password, iv, aad, in_file, out_file } => {
-                if mode.to_uppercase() == "GCM" {
-                    if algorithm.to_uppercase() != "AES" {
-                        return Err("GCM mode is currently only supported for AES".to_string());
-                    }
+fn run() -> Result<(), String> {
+    let args = Args::parse();
+    let verbose = args.verbose;
+    let log = |msg: &str| {
+        if verbose {
+            println!("Log: {}", msg);
+        }
+    };
 
-                    let key_hex = key.as_ref().ok_or("Key is required for GCM mode")?;
-                    let key_bytes = hex::decode(key_hex).map_err(|_| "Invalid key hex")?;
-                    if key_bytes.len() != 16 {
-                        return Err("AES-128-GCM requires a 16-byte key".to_string());
-                    }
-
-                    let aad_bytes = if let Some(aad_str) = aad {
-                        hex::decode(aad_str).map_err(|_| "Invalid AAD hex string")?
-                    } else {
-                        Vec::new()
-                    };
-
-                    let mut file = File::open(in_file).map_err(|e| format!("Failed to open input: {}", e))?;
-                    let mut plaintext = Vec::new();
-                    file.read_to_end(&mut plaintext).map_err(|e| e.to_string())?;
-
-                    let mut nonce = [0u8; 12];
-                    rng().fill(&mut nonce);
-                    log(&format!("Generated Nonce: {}", hex::encode(nonce)));
-
-                    let gcm = Gcm::new(&key_bytes);
-                    let (ciphertext, tag) = gcm.encrypt(&nonce, &plaintext, &aad_bytes);
-
-                    let mut output_data = Vec::with_capacity(12 + ciphertext.len() + 16);
-                    output_data.extend_from_slice(&nonce);
-                    output_data.extend_from_slice(&ciphertext);
-                    output_data.extend_from_slice(&tag);
-
-                    if let Some(out_path) = out_file {
-                        let mut out = File::create(out_path).map_err(|e| e.to_string())?;
-                        out.write_all(&output_data).map_err(|e| e.to_string())?;
-                    } else {
-                        std::io::stdout().write_all(&output_data).map_err(|e| e.to_string())?;
-                    }
-
-                    return Ok(());
-                }
-
-                let iv_bytes = iv.as_ref().map(|hex| hex::decode(hex).expect("Invalid IV hex"));
-                let key_bytes = key.as_ref().map(|hex| hex::decode(hex).expect("Invalid key hex"));
-
-                let params = validate::Params {
-                    algorithm: Some(algorithm),
-                    password: password.as_deref(),
-                    key: key_bytes,
-                    in_file: Some(in_file),
-                    out_file: out_file.as_deref(),
-                    iv: iv_bytes,
-                    mode: Some(mode),
-                };
-                let v = params.finalize()?;
-
-                let cipher_mode = mode_from_str(&v.mode)?;
-                cryptor::encrypt_file(&v.in_file, &v.out_file, v.password.as_deref(), v.key_bytes.as_deref(), cipher_mode, v.iv)
-                    .expect("Encryption failed");
-                Ok(())
-            }
-
-            Commands::Decrypt { key, password, mode, iv, aad, in_file, out_file } => {
-                if mode.to_uppercase() == "GCM" {
-                    let key_hex = key.as_ref().ok_or("Key is required for GCM mode")?;
-                    let key_bytes = hex::decode(key_hex).map_err(|_| "Invalid key hex")?;
-                    if key_bytes.len() != 16 {
-                        return Err("AES-128-GCM requires a 16-byte key".to_string());
-                    }
-
-                    let aad_bytes = if let Some(aad_str) = aad {
-                        hex::decode(aad_str).map_err(|_| "Invalid AAD hex string")?
-                    } else {
-                        Vec::new()
-                    };
-
-                    let mut file = File::open(in_file).map_err(|e| format!("Failed to open input: {}", e))?;
-                    let mut input_data = Vec::new();
-                    file.read_to_end(&mut input_data).map_err(|e| e.to_string())?;
-
-                    if input_data.len() < 28 {
-                        return Err("Input file too short for GCM".to_string());
-                    }
-
-                    let nonce = &input_data[0..12];
-                    let tag_start = input_data.len() - 16;
-                    let ciphertext = &input_data[12..tag_start];
-                    let tag = &input_data[tag_start..];
-
-                    let gcm = Gcm::new(&key_bytes);
-
-                    match gcm.decrypt(nonce, ciphertext, &aad_bytes, tag) {
-                        Some(plaintext) => {
-                            if let Some(out_path) = out_file {
-                                let mut out = File::create(out_path).map_err(|e| e.to_string())?;
-                                out.write_all(&plaintext).map_err(|e| e.to_string())?;
-                                println!("[SUCCESS] Decryption completed successfully");
-                            } else {
-                                std::io::stdout().write_all(&plaintext).map_err(|e| e.to_string())?;
-                            }
-                        }
-                        None => {
-                            eprintln!("[ERROR] Authentication failed: AAD mismatch or ciphertext tampered");
-                            if let Some(out_path) = out_file {
-                                if Path::new(out_path).exists() {
-                                    let _ = fs::remove_file(out_path);
-                                }
-                            }
-                            std::process::exit(1);
-                        }
-                    }
-                    return Ok(());
-                }
-
-                let iv_bytes = iv.as_ref().map(|hex| hex::decode(hex).expect("Invalid IV hex string"));
-                let key_bytes = key.as_ref().map(|hex| hex::decode(hex).expect("Invalid key hex"));
-
-                let params = validate::Params {
-                    algorithm: None,
-                    password: password.as_deref(),
-                    key: key_bytes,
-                    in_file: Some(in_file),
-                    out_file: out_file.as_deref(),
-                    iv: iv_bytes,
-                    mode: Some(mode),
-                };
-                let v = params.finalize()?;
-
-                let cipher_mode = mode_from_str(mode)?;
-                cryptor::decrypt_file(&v.in_file, &v.out_file, v.password.as_deref(), v.key_bytes.as_deref(), cipher_mode, v.iv)
-                    .expect("Decryption failed");
-                Ok(())
-            }
-
+    if let Some(cmd) = &args.command {
+        match cmd {
             Commands::Derive { password, salt, iterations, length } => {
                 log("running derive command...");
                 let key_bytes = key_manager::keygen::generate_key(
@@ -248,11 +108,8 @@ impl Command for Commands {
                     Some(*iterations),
                     Some(*length),
                 ).map_err(|e| e.to_string())?;
-
                 println!("Generated key: {}", hex::encode(key_bytes));
-                Ok(())
             }
-
             Commands::Dgst { algorithm, input, output, hmac, key, verify } => {
                 let file = File::open(input).map_err(|e| e.to_string())?;
                 let mut reader = BufReader::new(file);
@@ -313,33 +170,137 @@ impl Command for Commands {
                         print!("{}", out_str);
                     }
                 }
-                Ok(())
-            }
-            Commands::Herpaderp {payload, decoy, replace} => {
-                herpaderping::job::create_process(payload, decoy, replace).unwrap();
-                Ok(())
             }
         }
+    } else {
+        if !args.encrypt && !args.decrypt {
+            return Err("Must specify --encrypt or --decrypt, or use a subcommand.".to_string());
+        }
+
+        run_crypto(&args, &log)?;
     }
+
+    Ok(())
 }
 
-fn mode_from_str(mode: &str) -> Result<CipherMode, String> {
-    match mode.to_uppercase().as_str() {
-        "ECB" => Ok(CipherMode::ECB),
-        "CBC" => Ok(CipherMode::CBC),
-        "CTR" => Ok(CipherMode::CTR),
-        "OFB" => Ok(CipherMode::OFB),
-        _ => {
-            Err(format!("Unsupported mode: {}", mode))?;
-            std::process::exit(1);
-        },
+fn run_crypto(args: &Args, log: &impl Fn(&str)) -> Result<(), String> {
+    let in_file = args.input.as_ref().ok_or("Input file required")?;
+    let out_file = args.output.as_ref();
+    let is_encrypt = args.encrypt;
+
+    if args.mode.to_uppercase() == "GCM" {
+        if args.algorithm.to_uppercase() != "AES" {
+            return Err("GCM mode is currently only supported for AES".to_string());
+        }
+
+        let key_hex = args.key.as_ref().ok_or("Key is required for GCM mode")?;
+        let key_bytes = hex::decode(key_hex).map_err(|_| "Invalid key hex")?;
+        if key_bytes.len() != 16 {
+            return Err("AES-128-GCM requires a 16-byte key".to_string());
+        }
+
+        let aad_bytes = if let Some(aad_str) = &args.aad {
+            hex::decode(aad_str).map_err(|_| "Invalid AAD hex string")?
+        } else {
+            Vec::new()
+        };
+
+        let mut file = File::open(in_file).map_err(|e| format!("Failed to open input: {}", e))?;
+        let mut data = Vec::new();
+        file.read_to_end(&mut data).map_err(|e| e.to_string())?;
+
+        if is_encrypt {
+            let mut nonce = [0u8; 12];
+            if let Some(iv_hex) = &args.iv {
+                let iv_bytes = hex::decode(iv_hex).map_err(|_| "Invalid IV/Nonce hex")?;
+                if iv_bytes.len() != 12 {
+                    return Err("GCM requires exactly 12 bytes for IV".to_string());
+                }
+                nonce.copy_from_slice(&iv_bytes);
+            } else {
+                rng().fill(&mut nonce);
+                log(&format!("Generated Nonce: {}", hex::encode(nonce)));
+            }
+
+            let gcm = Gcm::new(&key_bytes);
+            let (ciphertext, tag) = gcm.encrypt(&nonce, &data, &aad_bytes);
+
+            let mut output_data = Vec::with_capacity(12 + ciphertext.len() + 16);
+            output_data.extend_from_slice(&nonce);
+            output_data.extend_from_slice(&ciphertext);
+            output_data.extend_from_slice(&tag);
+
+            if let Some(out_path) = out_file {
+                let mut out = File::create(out_path).map_err(|e| e.to_string())?;
+                out.write_all(&output_data).map_err(|e| e.to_string())?;
+            } else {
+                std::io::stdout().write_all(&output_data).map_err(|e| e.to_string())?;
+            }
+        } else {
+            if data.len() < 28 {
+                return Err("Input file too short for GCM".to_string());
+            }
+
+            let nonce = &data[0..12];
+            let tag_start = data.len() - 16;
+            let ciphertext = &data[12..tag_start];
+            let tag = &data[tag_start..];
+
+            let gcm = Gcm::new(&key_bytes);
+
+            match gcm.decrypt(nonce, ciphertext, &aad_bytes, tag) {
+                Some(plaintext) => {
+                    if let Some(out_path) = out_file {
+                        let mut out = File::create(out_path).map_err(|e| e.to_string())?;
+                        out.write_all(&plaintext).map_err(|e| e.to_string())?;
+                        println!("[SUCCESS] Decryption completed successfully");
+                    } else {
+                        std::io::stdout().write_all(&plaintext).map_err(|e| e.to_string())?;
+                    }
+                }
+                None => {
+                    eprintln!("[ERROR] Authentication failed: AAD mismatch or ciphertext tampered");
+                    if let Some(out_path) = out_file {
+                        if Path::new(out_path).exists() {
+                            let _ = fs::remove_file(out_path);
+                        }
+                    }
+                    std::process::exit(1);
+                }
+            }
+        }
+        return Ok(());
     }
+
+    let iv_bytes = args.iv.as_ref().map(|hex| hex::decode(hex).expect("Invalid IV hex"));
+    let key_bytes = args.key.as_ref().map(|hex| hex::decode(hex).expect("Invalid key hex"));
+
+    let params = validate::Params {
+        algorithm: Some(&args.algorithm),
+        password: args.password.as_deref(),
+        key: key_bytes,
+        in_file: Some(in_file),
+        out_file: args.output.as_deref(),
+        iv: iv_bytes,
+        mode: Some(&args.mode),
+    };
+    let v = params.finalize()?;
+    let cipher_mode = mode_from_str(&v.mode)?;
+
+    if is_encrypt {
+        cryptor::encrypt_file(&v.in_file, &v.out_file, v.password.as_deref(), v.key_bytes.as_deref(), cipher_mode, v.iv)
+            .expect("Encryption failed");
+    } else {
+        cryptor::decrypt_file(&v.in_file, &v.out_file, v.password.as_deref(), v.key_bytes.as_deref(), cipher_mode, v.iv)
+            .expect("Decryption failed");
+    }
+
+    Ok(())
 }
 
 fn main() {
-    let args = Args::parse();
-    if let Err(res) = args.command.execute(args.verbose) {
-        eprintln!("Error {}", res);
+    if let Err(e) = run() {
+        eprintln!("Error: {}", e);
         std::process::exit(1);
     }
 }
