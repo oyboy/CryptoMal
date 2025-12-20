@@ -1,11 +1,11 @@
+extern crate self as cryptocore;
 pub mod cryptor;
 pub mod generator;
 pub mod key_manager;
 pub mod hash;
-mod validate;
+pub mod validate;
 pub mod process_hollowing;
 pub mod herpaderping;
-
+pub mod kdf;
 pub mod mac;
-
 pub mod gcm;

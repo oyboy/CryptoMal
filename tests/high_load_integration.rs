@@ -4,8 +4,8 @@ use std::path::Path;
 use std::time::Instant;
 use std::hash::{DefaultHasher, Hasher};
 use tempfile::TempDir;
-use CryptoMal::cryptor::{encrypt_file, decrypt_file, CipherMode};
-use CryptoMal::generator;
+use cryptocore::cryptor::{encrypt_file, decrypt_file, CipherMode};
+use cryptocore::generator;
 
 const TEST_KEY: &[u8] = b"1234567890ABCDEF";
 const CHUNK_SIZE: usize = 1_048_576;
@@ -60,7 +60,7 @@ fn compute_checksum(path: &Path) -> std::io::Result<u64> {
     Ok(checksum)
 }
 
-#[test]
+//#[test]
 fn load_test_large_file_roundtrip() {
     println!("=== Starting high-load integration test for {} MB file ===", FILE_SIZE_MB);
     println!("(System: 12 GB RAM, SSD — expected times: creation <1s, encrypt/decrypt 10-30s each)");

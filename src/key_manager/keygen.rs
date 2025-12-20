@@ -1,13 +1,14 @@
 use std::io;
-use pbkdf2::{pbkdf2_hmac};
-use sha2::{Sha256};
+use cryptocore::kdf::pbkdf2::pbkdf2_hmac_sha256;
 const ITERATIONS: u32 = 10_000;
 pub const KEY_LEN: usize = 16;
 pub fn generate_key(password: &[u8], salt: &[u8], iterations: Option<u32>, key_len: Option<usize>) -> io::Result<Vec<u8>> {
-    let kl = key_len.unwrap_or_else(|| KEY_LEN);
-    let mut key = vec![0u8; kl];
-    let iter = iterations.unwrap_or_else(|| ITERATIONS);
-    pbkdf2_hmac::<Sha256>(password, salt, iter, &mut key);
+    let kl = key_len.unwrap_or(KEY_LEN);
+    let iter = iterations.unwrap_or(ITERATIONS);
+
+    let key = pbkdf2_hmac_sha256(password, salt, iter, kl)
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+
     Ok(key)
 }
 #[cfg(test)]

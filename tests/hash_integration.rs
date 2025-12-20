@@ -1,4 +1,4 @@
-use CryptoMal::hash::{Hasher, Sha256, Sha3};
+use cryptocore::hash::{Hasher, Sha256, Sha3};
 #[test]
 fn test_sha256_vectors() {
     let tests: Vec<(&[u8], &str)> = vec![

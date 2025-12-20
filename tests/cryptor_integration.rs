@@ -1,6 +1,6 @@
 use std::io::{Write, Read};
-use CryptoMal::cryptor::{encrypt_file, decrypt_file, CipherMode};
-use CryptoMal::generator;
+use cryptocore::cryptor::{encrypt_file, decrypt_file, CipherMode};
+use cryptocore::generator;
 #[cfg(test)]
 mod tests {
     use super::*;

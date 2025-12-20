@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod gcm_integration {
-    use CryptoMal::gcm::Gcm;
+    use cryptocore::gcm::Gcm;
     use rand::{Rng, rng};
 
     const KEY_HEX: &str = "00112233445566778899aabbccddeeff";

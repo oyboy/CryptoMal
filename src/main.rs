@@ -1,24 +1,16 @@
-mod validate;
-mod cryptor;
-mod key_manager;
-mod hash;
-mod process_hollowing;
-mod herpaderping;
-mod gcm;
-
-mod mac;
 pub mod generator;
 
 use std::fs::{self, File};
 use std::io::{BufReader, Read, Write};
 use std::path::Path;
 use clap::{Parser, Subcommand};
-use cryptor::CipherMode;
-use hash::{Hasher, Sha256, Sha3};
-use mac::hmac::Hmac;
-use crate::gcm::Gcm;
-use rand::{Rng, rng};
-
+use cryptocore::cryptor::{self, CipherMode};
+use cryptocore::hash::{Hasher, Sha256, Sha3};
+use cryptocore::mac::hmac::Hmac;
+use cryptocore::gcm::Gcm;
+use cryptocore::validate;
+use cryptocore::key_manager;
+use rand::RngCore;
 #[derive(Parser)]
 pub struct Args {
     #[arg(short, long)]
@@ -218,7 +210,7 @@ fn run_crypto(args: &Args, log: &impl Fn(&str)) -> Result<(), String> {
                 }
                 nonce.copy_from_slice(&iv_bytes);
             } else {
-                rng().fill(&mut nonce);
+                rand::rng().fill_bytes(&mut nonce);
                 log(&format!("Generated Nonce: {}", hex::encode(nonce)));
             }
 
