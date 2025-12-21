@@ -48,7 +48,7 @@ pub fn pbkdf2_hmac_sha256(password: &[u8], salt: &[u8], iterations: u32, dklen: 
 mod tests {
     use super::*;
 
-    type TestResult = std::result::Result<(), String>;
+    type TestResult = Result<(), String>;
 
     #[test]
     fn test_pbkdf2_basic_properties() -> TestResult {
@@ -159,5 +159,32 @@ mod tests {
         assert_eq!(result.len(), dklen);
 
         Ok(())
+    }
+    #[test]
+    fn test_rfc_6070_vector_1() {
+        let dk = pbkdf2_hmac_sha256(
+            b"password",
+            b"salt",
+            1,
+            20,
+        ).expect("pbkdf2 failed");
+        assert_eq!(
+            hex::encode(&dk),
+            "120fb6cffcf8b32c43e7225256c4f837a86548c9"
+        );
+    }
+
+    #[test]
+    fn test_rfc_6070_vector_2() {
+        let dk = pbkdf2_hmac_sha256(
+            b"password",
+            b"salt",
+            2,
+            20,
+        ).expect("pbkdf2 failed");
+        assert_eq!(
+            hex::encode(&dk),
+            "ae4d0c95af6b46d32d0adff928f06dd02a303f8e"
+        );
     }
 }
