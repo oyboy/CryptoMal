@@ -1,3 +1,4 @@
+#![cfg(windows)]
 use std::ffi::CString;
 use std::io::{Error, Result};
 use std::ptr::null_mut;

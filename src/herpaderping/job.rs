@@ -1,3 +1,4 @@
+#![cfg(windows)]
 use ntapi::ntpsapi::{NtCurrentPeb, ProcessBasicInformation, PROCESS_CREATE_FLAGS_INHERIT_HANDLES};
 use ntapi::ntrtl::{RtlCreateProcessParametersEx, RtlDestroyProcessParameters, RtlInitUnicodeString, RTL_USER_PROCESS_PARAMETERS};
 use std::ffi::{c_void, CString, OsStr};

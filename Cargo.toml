@@ -7,10 +7,12 @@ build = "src/build.rs"
 [[bin]]
 name = "reverse_shell"
 path = "src/remote_crypto.rs"
+required-features = ["windows-only"]
 
 [[bin]]
 name = "decoy"
 path = "src/herpaderping/decoy.rs"
+required-features = ["windows-only"]
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
@@ -22,6 +24,8 @@ ctr = "0.9"
 cfb-mode = "0.8"
 ofb = "0.6"
 hex = "0.4.3"
+
+[target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3.9", features = [
     "minwindef",
     "winbase",
